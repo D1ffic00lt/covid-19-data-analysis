@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-__all__ = ("load_deaths", "load_gdp")
+__all__ = ("load_deaths", "load_gdp", "USEFUL_COLUMNS", "NUM_COLUMNS", "get_bar_data", "get_pies_data")
 _NUMERIC_COLUMNS = [
     "total_cases", "new_cases",
     "total_deaths", "new_deaths",
@@ -23,6 +23,20 @@ _GDP_COLUMNS = {
     "2022 [YR2022]": "2022",
     "2023 [YR2023]": "2023",
 }
+USEFUL_COLUMNS = [
+    "iso_code",
+    "continent",
+    "location",
+    "date",
+    "total_cases",
+    "new_cases",
+    "total_deaths",
+    "new_deaths",
+    "total_deaths_per_million",
+    "total_cases_per_million",
+]
+NUM_COLUMNS = ["total_cases", "new_cases", "total_deaths", "new_deaths"]
+PIE_COLUMNS = ["date"] + NUM_COLUMNS
 
 
 def _get_deaths_by_cases(data_columns):
@@ -55,11 +69,12 @@ def load_deaths(
     deaths[_NUMERIC_COLUMNS] = deaths[_NUMERIC_COLUMNS].apply(pd.to_numeric, errors="coerce")
     deaths.date = pd.to_datetime(deaths.date)
     deaths = deaths.loc[deaths.iso_code.apply(lambda x: "OWID" not in x)]
+    deaths = deaths.loc[~deaths[_NUMERIC_COLUMNS].isna().all(axis=1), USEFUL_COLUMNS]
     deaths = deaths.loc[deaths.date.apply(lambda x: x.year < (max_year + 1))]
+
     deaths["year"] = deaths.date.apply(lambda x: x.year)
     deaths["month"] = deaths.date.apply(lambda x: x.month)
     deaths["day"] = deaths.date.apply(lambda x: x.day)
-
     deaths["deaths_by_cases"] = _get_deaths_by_cases(deaths[["total_deaths", "total_cases"]])
 
     locations = {}
@@ -98,3 +113,35 @@ def load_gdp(path: str) -> pd.DataFrame:
     gdp = pd.read_csv(path)
     gdp = gdp.rename(_GDP_COLUMNS, axis=1)
     return gdp
+
+
+def get_bar_data(path: str) -> dict:
+    deaths = pd.read_csv(path)
+    deaths[_NUMERIC_COLUMNS] = deaths[_NUMERIC_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    deaths.date = pd.to_datetime(deaths.date)
+    rows_with_nans = deaths.loc[deaths[USEFUL_COLUMNS].isna().any(axis=1), USEFUL_COLUMNS]
+    all_nans_indexes = rows_with_nans[NUM_COLUMNS].isna().all(axis=1)
+    return rows_with_nans[~all_nans_indexes].date.apply(lambda x: x.year).value_counts().to_dict()
+
+
+def get_pies_data(path: str):
+    deaths = pd.read_csv(path)
+    deaths[_NUMERIC_COLUMNS] = deaths[_NUMERIC_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    deaths.date = pd.to_datetime(deaths.date)
+    data_without_all_nans = deaths.loc[~deaths[_NUMERIC_COLUMNS].isna().all(axis=1), USEFUL_COLUMNS]
+    processed_rows_with_nans = data_without_all_nans.loc[:, PIE_COLUMNS]
+    processed_rows_with_nans.date = processed_rows_with_nans.date.apply(lambda x: x.year)
+    years = list(processed_rows_with_nans.date.unique())
+    years.sort()
+    years.pop(-1)
+    result = {}
+    for i, year in enumerate(years):
+        data = processed_rows_with_nans.loc[processed_rows_with_nans.date == year].drop("date", axis=1)
+        result[str(year)] = {
+            "row": int((i // 2) + 1),
+            "col": int((i % 2) + 1),
+            "labels": list(data.columns.astype(str).to_list()),
+            "values": list(data.isna().sum().values.tolist()),
+            "name": str(year)
+        }
+    return result
